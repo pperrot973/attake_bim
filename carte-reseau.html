@@ -146,24 +146,13 @@ const allBounds = [];
 // ── CHARGEMENT CATALOGUE ──────────────────────────────────────────────────────
 async function loadCatalogue() {
   try {
-    const r = await fetch(`${EDF_BASE}/datasets?visibility=public&size=100`);
+    // bbox=true → uniquement les datasets géo-indexés (avec bbox définie)
+    const r = await fetch(`${EDF_BASE}/datasets?visibility=public&size=100&bbox=true&select=id,title,summary,bbox,schema,projection`);
     const catalog = await r.json();
     const datasets = catalog.results || catalog;
 
-    // Garder uniquement les datasets géographiques (bbox indexée = données géo)
-    // + inclure les datasets réseau connus même sans bbox (postes, pylônes, lignes, installations)
-    const GEO_KEYWORDS = ['poste', 'pylône', 'pylone', 'ligne', 'installation', 'registre',
-                          'capacit', 'réseau électrique', 'raccordement', 'file d\'attente'];
-    const guyane = datasets.filter(d => {
-      const t = (d.title + ' ' + (d.summary || '')).toLowerCase();
-      const isGuyane = t.includes('guyane') || (d.owner && JSON.stringify(d.owner).toLowerCase().includes('guyane'));
-      const isGeo = d.bbox || GEO_KEYWORDS.some(k => t.includes(k));
-      return isGuyane && isGeo;
-    });
-
-    // Exclure datasets purement statistiques/temporels sans géométrie ponctuelle
-    const exclude = ['temps réel', 'horaire', 'annuelle', 'émission', 'emission', 'limitation'];
-    const geoDs = guyane.filter(d => !exclude.some(e => d.title.toLowerCase().includes(e)));
+    // Tous ces datasets sont géo, pas besoin de filtre géo supplémentaire
+    const geoDs = datasets;
 
     renderLayerPanel(geoDs);
 
@@ -232,20 +221,15 @@ async function loadLayer(ds) {
   try {
     let features = [];
 
-    // Essai 1 : GeoJSON natif (datasets avec champ géo indexé)
+    // Tous ces datasets sont géo-indexés (bbox=true dans le catalogue)
+    // data-fair reprojette automatiquement en WGS84 pour format=geojson
     const r1 = await fetch(`${EDF_BASE}/datasets/${ds.id}/lines?format=geojson&size=5000`);
     if (r1.ok) {
       const gj = await r1.json();
-      features = (gj.features || []).filter(f => {
-        if (!f.geometry || !f.geometry.coordinates) return false;
-        const c = f.geometry.coordinates;
-        const pt = f.geometry.type === 'Point' ? c : c[0];
-        const [x, y] = Array.isArray(pt[0]) ? pt[0] : pt;
-        return x >= -55 && x <= -50 && y >= 1 && y <= 7;
-      });
+      features = (gj.features || []).filter(f => f.geometry && f.geometry.coordinates);
     }
 
-    // Essai 2 : JSON brut + détection colonnes lat/lon
+    // Fallback JSON brut si geojson échoue ou vide (colonnes lat/lon non mappées en concept)
     if (!features.length) {
       const r2 = await fetch(`${EDF_BASE}/datasets/${ds.id}/lines?size=5000`);
       if (r2.ok) {
@@ -267,7 +251,7 @@ async function loadLayer(ds) {
     }
 
     if (!features.length) {
-      document.getElementById(`cnt-${ds.id}`).textContent = '-';
+      document.getElementById(`cnt-${ds.id}`).textContent = '0';
       return;
     }
 
