@@ -287,6 +287,18 @@
         </div>
       </div>
 
+      <!-- EDF GUYANE -->
+      <div class="card">
+        <div class="card-header">
+          <span class="icon">⚡</span>
+          <h3>Réseau EDF Guyane</h3>
+          <span id="badge-edf" class="badge badge-load"><span class="spinner"></span></span>
+        </div>
+        <div class="card-body" id="body-edf">
+          <div class="placeholder">Chargement...</div>
+        </div>
+      </div>
+
     </div>
   </div>
 </div>
@@ -356,8 +368,9 @@ async function geocode(query) {
 function initMap(lat, lon) {
   if (!map) {
     map = L.map('map').setView([lat, lon], 17);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap contributors', maxZoom: 19
+    // CartoDB Voyager — fonctionne sans Referer (file:// et localhost)
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      attribution: '© OpenStreetMap contributors © CARTO', maxZoom: 20, subdomains: 'abcd'
     }).addTo(map);
   } else {
     map.setView([lat, lon], 17);
@@ -591,6 +604,69 @@ async function loadHubeau(lat, lon) {
   }
 }
 
+// ── EDF GUYANE (data-fair) ───────────────────────────────────────────────────
+const EDF_BASE = 'https://opendata-guyane.edf.fr/data-fair/api/v1';
+
+async function loadEdfGuyane(lat, lon) {
+  try {
+    // 1. Découverte des datasets publics
+    const r = await fetchWithTimeout(`${EDF_BASE}/datasets?visibility=public&size=50`);
+    const catalog = await r.json();
+    const datasets = catalog.results || catalog;
+    if (!datasets.length) throw new Error('Catalogue vide');
+
+    // Mots-clés pour trouver les jeux pertinents (postes, lignes, réseau)
+    const keywords = ['poste', 'ligne', 'reseau', 'réseau', 'hta', 'htb', 'bta', 'electricit', 'électricit'];
+    const relevant = datasets.filter(d => {
+      const t = (d.title + ' ' + (d.summary || '')).toLowerCase();
+      return keywords.some(k => t.includes(k));
+    });
+
+    const targets = relevant.length ? relevant : datasets.slice(0, 3);
+    const geoDatasets = targets.filter(d => d.bbox && d.bbox.length === 4);
+
+    if (!geoDatasets.length) {
+      // Affiche la liste des datasets disponibles
+      const liste = datasets.slice(0, 6).map(d =>
+        `<div class="row"><span class="label" style="font-size:.8rem">${d.title}</span></div>`
+      ).join('');
+      document.getElementById('body-edf').innerHTML =
+        `<div style="font-size:.8rem;color:var(--muted);margin-bottom:8px">${datasets.length} jeux disponibles :</div>` + liste;
+      badge('badge-edf', true);
+      return;
+    }
+
+    // 2. Requête géographique sur le dataset le plus pertinent
+    const ds = geoDatasets[0];
+    const geoR = await fetchWithTimeout(
+      `${EDF_BASE}/datasets/${ds.id}/lines?geo_distance=${lat},${lon},2000&size=3`
+    );
+    const geoData = await geoR.json();
+    const items = geoData.results || [];
+
+    let html = `<div style="font-size:.8rem;color:var(--muted);margin-bottom:8px">📊 ${ds.title}</div>`;
+
+    if (items.length) {
+      const fields = ds.schema || [];
+      html += items.map(item => {
+        return fields.slice(0, 5).map(f => {
+          const val = item[f.key];
+          return val != null ? row(f.title || f.key, val) : '';
+        }).join('');
+      }).join('<hr style="margin:8px 0;border-color:#f3f4f6">');
+    } else {
+      html += '<div class="placeholder">Aucun élément réseau dans un rayon de 2 km.</div>';
+    }
+
+    document.getElementById('body-edf').innerHTML = html;
+    badge('badge-edf', true);
+  } catch(e) {
+    document.getElementById('body-edf').innerHTML =
+      `<div class="placeholder">EDF Guyane indisponible.<br><small>${e.message}</small></div>`;
+    badge('badge-edf', false);
+  }
+}
+
 // ── LANCER RECHERCHE ─────────────────────────────────────────────────────────
 async function lancerRecherche() {
   const query = document.getElementById('adresse-input').value.trim();
@@ -603,13 +679,13 @@ async function lancerRecherche() {
 
   // Reset badges
   ['badge-adresse','badge-ortho','badge-cadastre','badge-alti','badge-plu',
-   'badge-risques','badge-meteo','badge-dvf','badge-osm','badge-eau'].forEach(id => {
+   'badge-risques','badge-meteo','badge-dvf','badge-osm','badge-eau','badge-edf'].forEach(id => {
     const el = document.getElementById(id);
     el.className = 'badge badge-load';
     el.innerHTML = '<span class="spinner"></span>';
   });
   // Reset bodies
-  ['body-cadastre','body-alti','body-plu','body-risques','body-meteo','body-dvf','body-osm','body-eau'].forEach(id => {
+  ['body-cadastre','body-alti','body-plu','body-risques','body-meteo','body-dvf','body-osm','body-eau','body-edf'].forEach(id => {
     document.getElementById(id).innerHTML = '<div class="placeholder">Chargement...</div>';
   });
   document.getElementById('ortho-img').style.display = 'none';
@@ -641,6 +717,7 @@ async function lancerRecherche() {
       loadDVF(lat, lon),
       loadOSM(lat, lon),
       loadHubeau(lat, lon),
+      loadEdfGuyane(lat, lon),
     ]);
 
   } catch(e) {
