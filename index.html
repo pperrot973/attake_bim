@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>API Bâtiment — Fiche complète</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root {
+    --primary: #1a56db;
+    --primary-light: #e8f0fe;
+    --success: #0e9f6e;
+    --warning: #ff5a1f;
+    --danger: #e02424;
+    --bg: #f3f4f6;
+    --card: #ffffff;
+    --text: #111827;
+    --muted: #6b7280;
+    --border: #e5e7eb;
+    --radius: 12px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); }
+
+  /* HEADER */
+  header {
+    background: linear-gradient(135deg, #1a56db 0%, #0e4bab 100%);
+    color: white; padding: 24px 32px;
+    display: flex; align-items: center; gap: 16px;
+  }
+  header h1 { font-size: 1.5rem; font-weight: 700; }
+  header p { font-size: 0.85rem; opacity: 0.8; margin-top: 2px; }
+  .logo { font-size: 2rem; }
+
+  /* SEARCH */
+  .search-bar {
+    background: white; padding: 20px 32px;
+    border-bottom: 1px solid var(--border);
+    display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+  }
+  .search-bar input {
+    flex: 1; min-width: 280px; padding: 12px 16px;
+    border: 2px solid var(--border); border-radius: 8px;
+    font-size: 1rem; outline: none; transition: border-color .2s;
+  }
+  .search-bar input:focus { border-color: var(--primary); }
+  .btn {
+    padding: 12px 24px; border-radius: 8px; border: none;
+    font-size: 1rem; font-weight: 600; cursor: pointer; transition: .2s;
+  }
+  .btn-primary { background: var(--primary); color: white; }
+  .btn-primary:hover { background: #0e4bab; }
+  .btn-primary:disabled { background: #93c5fd; cursor: not-allowed; }
+  .btn-outline { background: white; color: var(--primary); border: 2px solid var(--primary); }
+  .btn-outline:hover { background: var(--primary-light); }
+
+  /* LAYOUT */
+  .container { max-width: 1400px; margin: 0 auto; padding: 24px 32px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 20px; }
+
+  /* CARD */
+  .card {
+    background: var(--card); border-radius: var(--radius);
+    border: 1px solid var(--border); overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06);
+  }
+  .card-header {
+    padding: 14px 18px; display: flex; align-items: center; gap: 10px;
+    border-bottom: 1px solid var(--border); background: #fafafa;
+  }
+  .card-header .icon { font-size: 1.3rem; }
+  .card-header h3 { font-size: 0.95rem; font-weight: 600; flex: 1; }
+  .badge {
+    font-size: 0.7rem; font-weight: 700; padding: 3px 8px;
+    border-radius: 999px; text-transform: uppercase; letter-spacing: .05em;
+  }
+  .badge-ok { background: #d1fae5; color: #065f46; }
+  .badge-err { background: #fee2e2; color: #991b1b; }
+  .badge-load { background: #dbeafe; color: #1e40af; }
+  .card-body { padding: 16px 18px; }
+
+  /* DATA ROWS */
+  .row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #f3f4f6; gap: 12px; }
+  .row:last-child { border-bottom: none; }
+  .row .label { color: var(--muted); font-size: 0.85rem; flex-shrink: 0; }
+  .row .value { font-size: 0.9rem; font-weight: 500; text-align: right; word-break: break-word; }
+  .value-good { color: var(--success); }
+  .value-warn { color: var(--warning); }
+  .value-bad { color: var(--danger); }
+
+  /* MAP */
+  #map { height: 320px; border-radius: var(--radius); border: 1px solid var(--border); }
+  .card-full { grid-column: 1 / -1; }
+
+  /* ORTHOPHOTO */
+  #ortho-img { width: 100%; border-radius: 8px; display: none; }
+
+  /* RISQUES */
+  .risque-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 0; border-bottom: 1px solid #f3f4f6; font-size: 0.88rem;
+  }
+  .risque-item:last-child { border-bottom: none; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .dot-red { background: var(--danger); }
+  .dot-green { background: var(--success); }
+
+  /* TRANSACTIONS */
+  .transaction {
+    padding: 10px 0; border-bottom: 1px solid #f3f4f6; font-size: 0.85rem;
+  }
+  .transaction:last-child { border-bottom: none; }
+  .transaction .price { font-weight: 700; color: var(--primary); font-size: 1rem; }
+
+  /* SPINNER */
+  .spinner { display: inline-block; width: 18px; height: 18px; border: 3px solid #dbeafe; border-top-color: var(--primary); border-radius: 50%; animation: spin .7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* PLACEHOLDER */
+  .placeholder { color: var(--muted); font-size: 0.88rem; text-align: center; padding: 24px 0; }
+
+  /* PREVISIONS */
+  .previsions { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+  .prev-day { min-width: 70px; text-align: center; background: var(--bg); border-radius: 8px; padding: 8px 6px; font-size: 0.78rem; }
+  .prev-day .temp { font-weight: 700; font-size: 1rem; color: var(--primary); }
+
+  /* EMPTY STATE */
+  .empty { text-align: center; padding: 60px 20px; color: var(--muted); }
+  .empty .big { font-size: 3rem; margin-bottom: 16px; }
+  .empty h2 { font-size: 1.2rem; margin-bottom: 8px; color: var(--text); }
+
+  @media (max-width: 600px) {
+    .container { padding: 16px; }
+    .search-bar { padding: 16px; }
+    header { padding: 16px; }
+    .grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">🏢</div>
+  <div>
+    <h1>API Bâtiment</h1>
+    <p>Données open data agrégées — BAN · IGN · Géorisques · DVF · PLU · Météo · OSM</p>
+  </div>
+</header>
+
+<div class="search-bar">
+  <input type="text" id="adresse-input" placeholder="Ex: 1 rue des Palmistes, Cayenne  —  ou  —  4.9224, -52.3135"
+    value="" autocomplete="off"/>
+  <button class="btn btn-primary" id="btn-search" onclick="lancerRecherche()">🔍 Rechercher</button>
+  <button class="btn btn-outline" onclick="geolocalize()">📍 Ma position</button>
+</div>
+
+<div class="container">
+  <div id="empty-state" class="empty">
+    <div class="big">🗺️</div>
+    <h2>Entrez une adresse ou des coordonnées GPS</h2>
+    <p>Ex : <strong>15 rue Schoelcher, Cayenne</strong> &nbsp;·&nbsp; <strong>4.9224, -52.3135</strong></p>
+  </div>
+
+  <div id="results" style="display:none">
+    <div class="grid">
+
+      <!-- CARTE -->
+      <div class="card card-full">
+        <div class="card-header">
+          <span class="icon">🗺️</span>
+          <h3>Localisation</h3>
+          <span id="badge-adresse" class="badge badge-load">...</span>
+        </div>
+        <div class="card-body">
+          <div id="adresse-text" style="margin-bottom:12px; font-size:1rem; font-weight:600;"></div>
+          <div id="map"></div>
+        </div>
+      </div>
+
+      <!-- ORTHOPHOTO -->
+      <div class="card">
+        <div class="card-header">
+          <span class="icon">🛰️</span>
+          <h3>Photo aérienne (IGN)</h3>
+          <span id="badge-ortho" class="badge badge-load"><span class="spinner"></span></span>
+        </div>
+        <div class="card-body">
+          <img id="ortho-img" alt="Orthophoto IGN"/>
+          <div id="ortho-placeholder" class="placeholder">Chargement...</div>
+        </div>
+      </div>
+
+      <!-- CADASTRE -->
+      <div class="card">
+        <div class="card-header">
+          <span class="icon">📐</span>
+          <h3>Cadastre</h3>
+          <span id="badge-cadastre" class="badge badge-load"><span class="spinner"></span></span>
+        </div>
+        <div class="card-body" id="body-cadastre">
+          <div class="placeholder">Chargement...</div>
+        </div>
+      </div>
+
+      <!-- ALTIMETRIE -->
+      <div class="card">
+        <div class="card-header">
+          <span class="icon">⛰️</span>
+          <h3>Altitude (RGE ALTI IGN)</h3>
+          <span id="badge-alti" class="badge badge-load"><span class="spinner"></span></span>
+        </div>
+        <div class="card-body" id="body-alti">
+          <div class="placeholder">Chargement...</div>
+        </div>
+      </div>
+
+      <!-- URBANISME -->
+      <div class="card">
+        <div class="card-header">
+          <span class="icon">🏗️</span>
+          <h3>Urbanisme / PLU</h3>
+          <span id="badge-plu" class="badge badge-load"><span class="spinner"></span></span>
+        </div>
+        <div class="card-body" id="body-plu">
+          <div class="placeholder">Chargement...</div>
+        </div>
+      </div>
+
+      <!-- GEORISQUES -->
+      <div class="card">
+        <div class="card-header">
+          <span class="icon">⚠️</span>
+          <h3>Géorisques</h3>
+          <span id="badge-risques" class="badge badge-load"><span class="spinner"></span></span>
+        </div>
+        <div class="card-body" id="body-risques">
+          <div class="placeholder">Chargement...</div>
+        </div>
+      </div>
+
+      <!-- METEO -->
+      <div class="card">
+        <div class="card-header">
+          <span class="icon">🌤️</span>
+          <h3>Météo (Open-Meteo)</h3>
+          <span id="badge-meteo" class="badge badge-load"><span class="spinner"></span></span>
+        </div>
+        <div class="card-body" id="body-meteo">
+          <div class="placeholder">Chargement...</div>
+        </div>
+      </div>
+
+      <!-- DVF -->
+      <div class="card">
+        <div class="card-header">
+          <span class="icon">💰</span>
+          <h3>Transactions DVF</h3>
+          <span id="badge-dvf" class="badge badge-load"><span class="spinner"></span></span>
+        </div>
+        <div class="card-body" id="body-dvf">
+          <div class="placeholder">Chargement...</div>
+        </div>
+      </div>
+
+      <!-- OSM -->
+      <div class="card">
+        <div class="card-header">
+          <span class="icon">🗂️</span>
+          <h3>OpenStreetMap</h3>
+          <span id="badge-osm" class="badge badge-load"><span class="spinner"></span></span>
+        </div>
+        <div class="card-body" id="body-osm">
+          <div class="placeholder">Chargement...</div>
+        </div>
+      </div>
+
+      <!-- HUBEAU -->
+      <div class="card">
+        <div class="card-header">
+          <span class="icon">💧</span>
+          <h3>Eau (Hub'Eau)</h3>
+          <span id="badge-eau" class="badge badge-load"><span class="spinner"></span></span>
+        </div>
+        <div class="card-body" id="body-eau">
+          <div class="placeholder">Chargement...</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+// ── CONFIG ──────────────────────────────────────────────────────────────────
+const TIMEOUT = 10000;
+let map = null, marker = null;
+
+// ── UTILS ────────────────────────────────────────────────────────────────────
+function latLonToTile(lat, lon, zoom) {
+  const n = Math.pow(2, zoom);
+  const x = Math.floor((lon + 180) / 360 * n);
+  const latRad = lat * Math.PI / 180;
+  const y = Math.floor((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n);
+  return { x, y };
+}
+
+async function fetchWithTimeout(url, opts = {}) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), TIMEOUT);
+  try {
+    const r = await fetch(url, { ...opts, signal: controller.signal });
+    clearTimeout(id);
+    return r;
+  } catch (e) {
+    clearTimeout(id);
+    throw e;
+  }
+}
+
+function badge(id, ok) {
+  const el = document.getElementById(id);
+  el.className = 'badge ' + (ok ? 'badge-ok' : 'badge-err');
+  el.textContent = ok ? 'OK' : 'Indisponible';
+}
+
+function row(label, value, cls = '') {
+  return `<div class="row"><span class="label">${label}</span><span class="value ${cls}">${value ?? '—'}</span></div>`;
+}
+
+// ── GEOCODAGE ────────────────────────────────────────────────────────────────
+async function geocode(query) {
+  // Détecter si c'est des coordonnées (lat, lon)
+  const coordMatch = query.trim().match(/^(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)$/);
+  if (coordMatch) {
+    return { lat: parseFloat(coordMatch[1]), lon: parseFloat(coordMatch[2]), label: query };
+  }
+  const r = await fetchWithTimeout(
+    `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(query)}&limit=1`
+  );
+  const d = await r.json();
+  if (!d.features?.length) return null;
+  const f = d.features[0];
+  return {
+    lat: f.geometry.coordinates[1],
+    lon: f.geometry.coordinates[0],
+    label: f.properties.label,
+    commune: f.properties.city,
+    postcode: f.properties.postcode,
+    citycode: f.properties.citycode,
+    score: f.properties.score,
+  };
+}
+
+// ── INIT MAP ─────────────────────────────────────────────────────────────────
+function initMap(lat, lon) {
+  if (!map) {
+    map = L.map('map').setView([lat, lon], 17);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors', maxZoom: 19
+    }).addTo(map);
+  } else {
+    map.setView([lat, lon], 17);
+  }
+  if (marker) map.removeLayer(marker);
+  marker = L.marker([lat, lon]).addTo(map);
+}
+
+// ── ORTHOPHOTO ───────────────────────────────────────────────────────────────
+async function loadOrthophoto(lat, lon) {
+  const zoom = 18;
+  const { x, y } = latLonToTile(lat, lon, zoom);
+  const url = `https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&FORMAT=image/jpeg&TILEMATRIXSET=PM&TILEMATRIX=${zoom}&TILEROW=${y}&TILECOL=${x}`;
+  const img = document.getElementById('ortho-img');
+  const ph = document.getElementById('ortho-placeholder');
+  img.onload = () => { img.style.display = 'block'; ph.style.display = 'none'; badge('badge-ortho', true); };
+  img.onerror = () => { ph.textContent = 'Photo aérienne indisponible pour cette zone.'; badge('badge-ortho', false); };
+  img.src = url;
+}
+
+// ── CADASTRE ─────────────────────────────────────────────────────────────────
+async function loadCadastre(lat, lon) {
+  try {
+    const geom = encodeURIComponent(JSON.stringify({ type: 'Point', coordinates: [lon, lat] }));
+    const r = await fetchWithTimeout(`https://apicarto.ign.fr/api/cadastre/parcelle?geom=${geom}&_limit=1`);
+    const d = await r.json();
+    const f = d.features?.[0];
+    if (!f) throw new Error('Aucune parcelle');
+    const p = f.properties;
+    document.getElementById('body-cadastre').innerHTML =
+      row('Section', `${p.prefixe || ''}${p.section}`) +
+      row('Numéro', p.numero) +
+      row('IDU', `<code style="font-size:.8rem">${p.idu}</code>`) +
+      row('Contenance', p.contenance ? `${p.contenance.toLocaleString('fr')} m²` : null);
+    badge('badge-cadastre', true);
+  } catch {
+    document.getElementById('body-cadastre').innerHTML = '<div class="placeholder">Données cadastrales indisponibles.</div>';
+    badge('badge-cadastre', false);
+  }
+}
+
+// ── ALTIMETRIE ───────────────────────────────────────────────────────────────
+async function loadAltimetrie(lat, lon) {
+  try {
+    const r = await fetchWithTimeout(
+      `https://data.geopf.fr/altimetrie/1.0/calcul/alti/rest/elevation.json?lon=${lon}&lat=${lat}&resource=ign_rge_alti_wld&zonly=true`
+    );
+    const d = await r.json();
+    const alt = d.elevations?.[0]?.z;
+    if (alt == null || alt === -99999) throw new Error();
+    document.getElementById('body-alti').innerHTML =
+      row('Altitude NGF', `<strong style="font-size:1.3rem">${alt.toFixed(1)} m</strong>`) +
+      row('Source', 'RGE ALTI 1m (IGN)');
+    badge('badge-alti', true);
+  } catch {
+    document.getElementById('body-alti').innerHTML = '<div class="placeholder">Altitude indisponible.</div>';
+    badge('badge-alti', false);
+  }
+}
+
+// ── PLU ───────────────────────────────────────────────────────────────────────
+async function loadPLU(lat, lon) {
+  try {
+    const geom = encodeURIComponent(JSON.stringify({ type: 'Point', coordinates: [lon, lat] }));
+    const r = await fetchWithTimeout(`https://apicarto.ign.fr/api/gpu/zone-urba?geom=${geom}`);
+    const d = await r.json();
+    const feats = d.features || [];
+    if (!feats.length) throw new Error('Aucune zone');
+    const html = feats.map(f => {
+      const p = f.properties;
+      const couleur = { U: '#1a56db', AU: '#ff5a1f', A: '#0e9f6e', N: '#4b5563' }[p.typezone?.[0]] || '#6b7280';
+      return `<div class="row">
+        <span class="label"><span style="background:${couleur};color:white;padding:2px 7px;border-radius:4px;font-size:.8rem;font-weight:700">${p.typezone || '?'}</span></span>
+        <span class="value">${p.libelong || p.libelle || '—'}</span>
+      </div>`;
+    }).join('');
+    document.getElementById('body-plu').innerHTML = html;
+    badge('badge-plu', true);
+  } catch {
+    document.getElementById('body-plu').innerHTML = '<div class="placeholder">Zonage PLU indisponible.</div>';
+    badge('badge-plu', false);
+  }
+}
+
+// ── GEORISQUES ────────────────────────────────────────────────────────────────
+async function loadGeorisques(lat, lon) {
+  try {
+    const r = await fetchWithTimeout(
+      `https://www.georisques.gouv.fr/api/v1/gaspar/risques?latlon=${lon},${lat}&rayon=0`
+    );
+    const d = await r.json();
+    const risques = d.data || [];
+    if (!risques.length) {
+      document.getElementById('body-risques').innerHTML =
+        '<div class="placeholder" style="color:#065f46">✅ Aucun risque recensé pour ce point.</div>';
+      badge('badge-risques', true);
+      return;
+    }
+    const html = risques.map(r =>
+      `<div class="risque-item"><div class="dot dot-red"></div>${r.libelle_risque_court || r.libelle_risque}</div>`
+    ).join('');
+    document.getElementById('body-risques').innerHTML = html;
+    badge('badge-risques', true);
+  } catch {
+    document.getElementById('body-risques').innerHTML = '<div class="placeholder">Géorisques indisponible.</div>';
+    badge('badge-risques', false);
+  }
+}
+
+// ── METEO ─────────────────────────────────────────────────────────────────────
+async function loadMeteo(lat, lon) {
+  try {
+    const r = await fetchWithTimeout(
+      `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
+      `&current=temperature_2m,relative_humidity_2m,wind_speed_10m,precipitation,weather_code` +
+      `&daily=temperature_2m_max,temperature_2m_min,precipitation_sum&timezone=auto&forecast_days=7`
+    );
+    const d = await r.json();
+    const c = d.current || {};
+    const daily = d.daily || {};
+    const icons = { 0:'☀️',1:'🌤️',2:'⛅',3:'☁️',45:'🌫️',48:'🌫️',51:'🌦️',61:'🌧️',71:'❄️',80:'🌧️',95:'⛈️' };
+    const wicon = icons[c.weather_code] || '🌡️';
+
+    let prev = '<div class="previsions">';
+    const times = daily.time || [];
+    times.forEach((t, i) => {
+      const d2 = new Date(t);
+      const j = d2.toLocaleDateString('fr', { weekday: 'short' });
+      const tmax = daily.temperature_2m_max?.[i]?.toFixed(0) ?? '—';
+      const tmin = daily.temperature_2m_min?.[i]?.toFixed(0) ?? '—';
+      const pluie = daily.precipitation_sum?.[i]?.toFixed(0) ?? '—';
+      prev += `<div class="prev-day"><div>${j}</div><div class="temp">${tmax}°</div><div style="color:#6b7280">${tmin}°</div><div>🌧️${pluie}mm</div></div>`;
+    });
+    prev += '</div>';
+
+    document.getElementById('body-meteo').innerHTML =
+      row('Température', `${wicon} <strong>${c.temperature_2m?.toFixed(1)}°C</strong>`) +
+      row('Humidité', `${c.relative_humidity_2m}%`) +
+      row('Vent', `${c.wind_speed_10m?.toFixed(0)} km/h`) +
+      row('Précipitations', `${c.precipitation} mm`) +
+      `<div style="margin-top:12px; font-size:.8rem; color:var(--muted); margin-bottom:6px">Prévisions 7 jours</div>` +
+      prev;
+    badge('badge-meteo', true);
+  } catch {
+    document.getElementById('body-meteo').innerHTML = '<div class="placeholder">Météo indisponible.</div>';
+    badge('badge-meteo', false);
+  }
+}
+
+// ── DVF ───────────────────────────────────────────────────────────────────────
+async function loadDVF(lat, lon) {
+  try {
+    const r = await fetchWithTimeout(`https://api.cquest.org/dvf?lat=${lat}&lon=${lon}&dist=300`);
+    const d = await r.json();
+    const items = d.resultats || d.features || [];
+    if (!items.length) throw new Error('Aucune transaction');
+
+    const withPrice = items.filter(i => {
+      const p = i.properties || i;
+      return p.valeur_fonciere && p.surface_reelle_bati;
+    });
+    const prixM2 = withPrice.length
+      ? Math.round(withPrice.reduce((s, i) => {
+          const p = i.properties || i;
+          return s + p.valeur_fonciere / p.surface_reelle_bati;
+        }, 0) / withPrice.length)
+      : null;
+
+    let html = prixM2 ? row('Prix moyen /m²', `<strong class="value-good">${prixM2.toLocaleString('fr')} €/m²</strong>`) : '';
+    html += `<div style="margin-top:8px">`;
+    items.slice(0, 4).forEach(i => {
+      const p = i.properties || i;
+      html += `<div class="transaction">
+        <span class="price">${p.valeur_fonciere ? parseInt(p.valeur_fonciere).toLocaleString('fr') + ' €' : '—'}</span>
+        <span style="color:var(--muted);font-size:.8rem;margin-left:8px">${p.date_mutation || ''}</span><br>
+        ${p.type_local || '—'} · ${p.surface_reelle_bati ? p.surface_reelle_bati + ' m²' : '—'}
+      </div>`;
+    });
+    html += '</div>';
+    document.getElementById('body-dvf').innerHTML = html;
+    badge('badge-dvf', true);
+  } catch {
+    document.getElementById('body-dvf').innerHTML = '<div class="placeholder">Transactions DVF indisponibles.</div>';
+    badge('badge-dvf', false);
+  }
+}
+
+// ── OSM ───────────────────────────────────────────────────────────────────────
+async function loadOSM(lat, lon) {
+  try {
+    const query = `[out:json][timeout:10];(way(around:100,${lat},${lon})["building"];);out body geom;`;
+    const r = await fetchWithTimeout('https://overpass-api.de/api/interpreter', {
+      method: 'POST', body: 'data=' + encodeURIComponent(query)
+    });
+    const d = await r.json();
+    const el = d.elements?.[0];
+    if (!el) throw new Error('Aucun bâtiment OSM');
+    const t = el.tags || {};
+    document.getElementById('body-osm').innerHTML =
+      row('OSM ID', el.id) +
+      row('Type', t.building) +
+      row('Niveaux', t['building:levels']) +
+      row('Matériaux', t['building:material']) +
+      row('Nom', t.name) +
+      row('Usage', t.amenity);
+    badge('badge-osm', true);
+  } catch {
+    document.getElementById('body-osm').innerHTML = '<div class="placeholder">Données OSM indisponibles.</div>';
+    badge('badge-osm', false);
+  }
+}
+
+// ── HUBEAU ────────────────────────────────────────────────────────────────────
+async function loadHubeau(lat, lon) {
+  try {
+    const bbox = `${lon-.05},${lat-.05},${lon+.05},${lat+.05}`;
+    const r = await fetchWithTimeout(
+      `https://hubeau.eaufrance.fr/api/v1/niveaux_nappes/stations?bbox=${bbox}&size=3`
+    );
+    const d = await r.json();
+    const items = d.data || [];
+    if (!items.length) throw new Error();
+    const html = items.map(s =>
+      row(s.nom_commune || s.code_bss, s.nature_station || '—')
+    ).join('');
+    document.getElementById('body-eau').innerHTML = html;
+    badge('badge-eau', true);
+  } catch {
+    document.getElementById('body-eau').innerHTML = '<div class="placeholder">Données eau indisponibles.</div>';
+    badge('badge-eau', false);
+  }
+}
+
+// ── LANCER RECHERCHE ─────────────────────────────────────────────────────────
+async function lancerRecherche() {
+  const query = document.getElementById('adresse-input').value.trim();
+  if (!query) return;
+
+  document.getElementById('btn-search').disabled = true;
+  document.getElementById('btn-search').textContent = '⏳ Recherche...';
+  document.getElementById('empty-state').style.display = 'none';
+  document.getElementById('results').style.display = 'block';
+
+  // Reset badges
+  ['badge-adresse','badge-ortho','badge-cadastre','badge-alti','badge-plu',
+   'badge-risques','badge-meteo','badge-dvf','badge-osm','badge-eau'].forEach(id => {
+    const el = document.getElementById(id);
+    el.className = 'badge badge-load';
+    el.innerHTML = '<span class="spinner"></span>';
+  });
+  // Reset bodies
+  ['body-cadastre','body-alti','body-plu','body-risques','body-meteo','body-dvf','body-osm','body-eau'].forEach(id => {
+    document.getElementById(id).innerHTML = '<div class="placeholder">Chargement...</div>';
+  });
+  document.getElementById('ortho-img').style.display = 'none';
+  document.getElementById('ortho-placeholder').style.display = 'block';
+  document.getElementById('ortho-placeholder').textContent = 'Chargement...';
+
+  try {
+    const loc = await geocode(query);
+    if (!loc) {
+      alert('Adresse introuvable. Essayez avec des coordonnées GPS (ex: 4.9224, -52.3135)');
+      document.getElementById('btn-search').disabled = false;
+      document.getElementById('btn-search').textContent = '🔍 Rechercher';
+      return;
+    }
+
+    const { lat, lon } = loc;
+    document.getElementById('adresse-text').textContent = loc.label || `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+    badge('badge-adresse', true);
+    initMap(lat, lon);
+
+    // Lancement parallèle de tous les providers
+    await Promise.allSettled([
+      loadOrthophoto(lat, lon),
+      loadCadastre(lat, lon),
+      loadAltimetrie(lat, lon),
+      loadPLU(lat, lon),
+      loadGeorisques(lat, lon),
+      loadMeteo(lat, lon),
+      loadDVF(lat, lon),
+      loadOSM(lat, lon),
+      loadHubeau(lat, lon),
+    ]);
+
+  } catch(e) {
+    alert('Erreur : ' + e.message);
+  }
+
+  document.getElementById('btn-search').disabled = false;
+  document.getElementById('btn-search').textContent = '🔍 Rechercher';
+}
+
+// ── GEOLOCALISATION ──────────────────────────────────────────────────────────
+function geolocalize() {
+  if (!navigator.geolocation) { alert('Géolocalisation non supportée.'); return; }
+  navigator.geolocation.getCurrentPosition(pos => {
+    const { latitude, longitude } = pos.coords;
+    document.getElementById('adresse-input').value = `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
+    lancerRecherche();
+  }, () => alert('Impossible d\'obtenir votre position.'));
+}
+
+// Recherche avec touche Entrée
+document.getElementById('adresse-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') lancerRecherche();
+});
+</script>
+</body>
+</html>
