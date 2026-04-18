@@ -522,6 +522,13 @@ async function loadMeteo(lat, lon) {
 
 // ── DVF ───────────────────────────────────────────────────────────────────────
 async function loadDVF(lat, lon) {
+  // DVF non disponible pour les DOM-TOM (Guyane, Martinique, Guadeloupe, Réunion, Mayotte)
+  if (lat < 20 && lon < -40) {
+    document.getElementById('body-dvf').innerHTML =
+      '<div class="placeholder">DVF non disponible en Guyane.<br><small style="color:#9ca3af">La DGFiP ne publie pas les mutations foncières pour les DOM-TOM.</small></div>';
+    badge('badge-dvf', false);
+    return;
+  }
   try {
     const r = await fetchWithTimeout(`https://api.cquest.org/dvf?lat=${lat}&lon=${lon}&dist=300`);
     const d = await r.json();
@@ -561,10 +568,13 @@ async function loadDVF(lat, lon) {
 // ── OSM ───────────────────────────────────────────────────────────────────────
 async function loadOSM(lat, lon) {
   try {
-    const query = `[out:json][timeout:10];(way(around:100,${lat},${lon})["building"];);out body geom;`;
-    const r = await fetchWithTimeout('https://overpass-api.de/api/interpreter', {
-      method: 'POST', body: 'data=' + encodeURIComponent(query)
+    const query = `[out:json][timeout:15];(way(around:150,${lat},${lon})["building"];);out body geom;`;
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), 20000);
+    const r = await fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST', body: 'data=' + encodeURIComponent(query), signal: controller.signal
     });
+    clearTimeout(id);
     const d = await r.json();
     const el = d.elements?.[0];
     if (!el) throw new Error('Aucun bâtiment OSM');
@@ -609,60 +619,74 @@ const EDF_BASE = 'https://opendata-guyane.edf.fr/data-fair/api/v1';
 
 async function loadEdfGuyane(lat, lon) {
   try {
-    // 1. Découverte des datasets publics
-    const r = await fetchWithTimeout(`${EDF_BASE}/datasets?visibility=public&size=50`);
+    const r = await fetchWithTimeout(`${EDF_BASE}/datasets?visibility=public&size=100`);
     const catalog = await r.json();
     const datasets = catalog.results || catalog;
     if (!datasets.length) throw new Error('Catalogue vide');
 
-    // Mots-clés pour trouver les jeux pertinents (postes, lignes, réseau)
-    const keywords = ['poste', 'ligne', 'reseau', 'réseau', 'hta', 'htb', 'bta', 'electricit', 'électricit'];
-    const relevant = datasets.filter(d => {
-      const t = (d.title + ' ' + (d.summary || '')).toLowerCase();
-      return keywords.some(k => t.includes(k));
-    });
+    // Filtrer les datasets Guyane
+    const guyane = datasets.filter(d =>
+      (d.title + ' ' + (d.summary || '')).toLowerCase().includes('guyane')
+    );
 
-    const targets = relevant.length ? relevant : datasets.slice(0, 3);
-    const geoDatasets = targets.filter(d => d.bbox && d.bbox.length === 4);
+    let html = `<div style="font-size:.8rem;color:var(--muted);margin-bottom:10px">
+      ${datasets.length} jeux disponibles — ${guyane.length} concernent la Guyane</div>`;
 
-    if (!geoDatasets.length) {
-      // Affiche la liste des datasets disponibles
-      const liste = datasets.slice(0, 6).map(d =>
-        `<div class="row"><span class="label" style="font-size:.8rem">${d.title}</span></div>`
-      ).join('');
-      document.getElementById('body-edf').innerHTML =
-        `<div style="font-size:.8rem;color:var(--muted);margin-bottom:8px">${datasets.length} jeux disponibles :</div>` + liste;
-      badge('badge-edf', true);
-      return;
+    // 1. Production temps réel Guyane
+    const prodDs = guyane.find(d => d.title.toLowerCase().includes('production') && d.title.toLowerCase().includes('temps réel'));
+    if (prodDs) {
+      const pr = await fetchWithTimeout(`${EDF_BASE}/datasets/${prodDs.id}/lines?size=1&sort=-_updatedAt`);
+      const pd = await pr.json();
+      const item = (pd.results || [])[0];
+      if (item) {
+        html += `<div style="font-weight:600;font-size:.85rem;margin-bottom:6px">⚡ ${prodDs.title}</div>`;
+        const fields = (prodDs.schema || []).filter(f => !f.key.startsWith('_'));
+        html += fields.slice(0, 8).map(f => {
+          const val = item[f.key];
+          return val != null ? row(f.title || f.key, typeof val === 'number' ? val.toLocaleString('fr') : val) : '';
+        }).join('');
+      }
     }
 
-    // 2. Requête géographique sur le dataset le plus pertinent
-    const ds = geoDatasets[0];
-    const geoR = await fetchWithTimeout(
-      `${EDF_BASE}/datasets/${ds.id}/lines?geo_distance=${lat},${lon},2000&size=3`
-    );
-    const geoData = await geoR.json();
-    const items = geoData.results || [];
+    // 2. Datasets géo Guyane (postes, lignes...)
+    const geoDs = guyane.filter(d => d.bbox && d.bbox.length === 4 &&
+      !d.title.toLowerCase().includes('production'));
 
-    let html = `<div style="font-size:.8rem;color:var(--muted);margin-bottom:8px">📊 ${ds.title}</div>`;
+    for (const ds of geoDs.slice(0, 2)) {
+      try {
+        const gr = await fetchWithTimeout(
+          `${EDF_BASE}/datasets/${ds.id}/lines?geo_distance=${lat},${lon},5000&size=2`
+        );
+        const gd = await gr.json();
+        const items = gd.results || [];
+        if (items.length) {
+          html += `<hr style="margin:10px 0;border-color:#f3f4f6">
+            <div style="font-weight:600;font-size:.85rem;margin-bottom:6px">📍 ${ds.title}</div>`;
+          const fields = (ds.schema || []).filter(f => !f.key.startsWith('_'));
+          items.forEach(item => {
+            html += fields.slice(0, 5).map(f => {
+              const val = item[f.key];
+              return val != null ? row(f.title || f.key, val) : '';
+            }).join('');
+          });
+        }
+      } catch {}
+    }
 
-    if (items.length) {
-      const fields = ds.schema || [];
-      html += items.map(item => {
-        return fields.slice(0, 5).map(f => {
-          const val = item[f.key];
-          return val != null ? row(f.title || f.key, val) : '';
-        }).join('');
-      }).join('<hr style="margin:8px 0;border-color:#f3f4f6">');
-    } else {
-      html += '<div class="placeholder">Aucun élément réseau dans un rayon de 2 km.</div>';
+    // 3. Liste des autres datasets Guyane
+    if (guyane.length > 1) {
+      html += `<hr style="margin:10px 0;border-color:#f3f4f6">
+        <div style="font-size:.78rem;color:var(--muted);margin-bottom:4px">Autres jeux disponibles :</div>`;
+      html += guyane.filter(d => d !== prodDs).slice(0, 5).map(d =>
+        `<div style="font-size:.78rem;padding:3px 0;border-bottom:1px solid #f9fafb">• ${d.title}</div>`
+      ).join('');
     }
 
     document.getElementById('body-edf').innerHTML = html;
     badge('badge-edf', true);
   } catch(e) {
     document.getElementById('body-edf').innerHTML =
-      `<div class="placeholder">EDF Guyane indisponible.<br><small>${e.message}</small></div>`;
+      `<div class="placeholder">EDF Guyane indisponible.<br><small style="color:#9ca3af">${e.message}</small></div>`;
     badge('badge-edf', false);
   }
 }
