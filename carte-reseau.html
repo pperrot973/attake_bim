@@ -205,6 +205,24 @@ function renderLayerPanel(datasets) {
   }).join('');
 }
 
+// ── DÉTECTION COLONNES LAT/LON ────────────────────────────────────────────────
+const LAT_KEYS = ['latitude','lat','y','coord_y','coordonnee_y','wgs84_lat'];
+const LON_KEYS = ['longitude','lon','lng','x','coord_x','coordonnee_x','wgs84_lon'];
+
+function findLatLon(record) {
+  const keys = Object.keys(record).map(k => k.toLowerCase());
+  const latKey = Object.keys(record).find(k => LAT_KEYS.includes(k.toLowerCase()));
+  const lonKey = Object.keys(record).find(k => LON_KEYS.includes(k.toLowerCase()));
+  if (!latKey || !lonKey) return null;
+  const lat = parseFloat(String(record[latKey]).replace(',','.'));
+  const lon = parseFloat(String(record[lonKey]).replace(',','.'));
+  if (isNaN(lat) || isNaN(lon)) return null;
+  if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return null;
+  // Vérifier dans la zone Guyane approximative
+  if (lat < 1 || lat > 7 || lon < -55 || lon > -50) return null;
+  return [lon, lat];
+}
+
 // ── CHARGEMENT COUCHE ─────────────────────────────────────────────────────────
 async function loadLayer(ds) {
   const style = getStyle(ds.title);
@@ -212,56 +230,51 @@ async function loadLayer(ds) {
   layerGroups[ds.id] = group;
 
   try {
-    const bbox = `${GUYANE_BBOX[0]},${GUYANE_BBOX[1]},${GUYANE_BBOX[2]},${GUYANE_BBOX[3]}`;
+    let features = [];
 
-    // Essai 1 : avec filtre bbox
-    let r = await fetch(`${EDF_BASE}/datasets/${ds.id}/lines?format=geojson&bbox=${bbox}&size=5000`);
-    if (!r.ok) { document.getElementById(`cnt-${ds.id}`).textContent = '-'; return; }
-    let geojson = await r.json();
-    let features = (geojson.features || []).filter(f => f.geometry);
-
-    // Essai 2 : sans bbox si résultat vide
-    if (!features.length) {
-      r = await fetch(`${EDF_BASE}/datasets/${ds.id}/lines?format=geojson&size=5000`);
-      if (!r.ok) { document.getElementById(`cnt-${ds.id}`).textContent = '-'; return; }
-      geojson = await r.json();
-      features = (geojson.features || []).filter(f => f.geometry);
+    // Essai 1 : GeoJSON natif (datasets avec champ géo indexé)
+    const r1 = await fetch(`${EDF_BASE}/datasets/${ds.id}/lines?format=geojson&size=5000`);
+    if (r1.ok) {
+      const gj = await r1.json();
+      features = (gj.features || []).filter(f => {
+        if (!f.geometry || !f.geometry.coordinates) return false;
+        const c = f.geometry.coordinates;
+        const pt = f.geometry.type === 'Point' ? c : c[0];
+        const [x, y] = Array.isArray(pt[0]) ? pt[0] : pt;
+        return x >= -55 && x <= -50 && y >= 1 && y <= 7;
+      });
     }
 
-    // Essai 3 : endpoint GeoJSON dédié du dataset
+    // Essai 2 : JSON brut + détection colonnes lat/lon
     if (!features.length) {
-      r = await fetch(`${EDF_BASE}/datasets/${ds.id}/geo_agg?precision=6`);
-      if (r.ok) {
-        const geo2 = await r.json();
-        features = (geo2.features || []).filter(f => f.geometry);
-        if (features.length) geojson = geo2;
+      const r2 = await fetch(`${EDF_BASE}/datasets/${ds.id}/lines?size=5000`);
+      if (r2.ok) {
+        const data = await r2.json();
+        const records = data.results || data;
+        if (Array.isArray(records)) {
+          for (const rec of records) {
+            const coords = findLatLon(rec);
+            if (coords) {
+              features.push({
+                type: 'Feature',
+                geometry: { type: 'Point', coordinates: coords },
+                properties: rec
+              });
+            }
+          }
+        }
       }
     }
 
     if (!features.length) {
-      document.getElementById(`cnt-${ds.id}`).textContent = '0';
+      document.getElementById(`cnt-${ds.id}`).textContent = '-';
       return;
     }
 
-    // Valider coordonnées WGS84 (filtre anti-CRS local)
-    const validFeatures = features.filter(f => {
-      const g = f.geometry;
-      if (!g || !g.coordinates) return false;
-      const coords = g.type === 'Point' ? [g.coordinates]
-        : g.type === 'LineString' ? g.coordinates
-        : g.type === 'Polygon' ? g.coordinates[0] : [];
-      return coords.every(([x, y]) => x >= -180 && x <= 180 && y >= -90 && y <= 90);
-    });
+    totalFeatures += features.length;
+    document.getElementById(`cnt-${ds.id}`).textContent = features.length;
 
-    if (!validFeatures.length) {
-      document.getElementById(`cnt-${ds.id}`).textContent = '⚠';
-      return;
-    }
-
-    geojson = { type: 'FeatureCollection', features: validFeatures };
-    totalFeatures += validFeatures.length;
-    document.getElementById(`cnt-${ds.id}`).textContent = validFeatures.length;
-
+    const geojson = { type: 'FeatureCollection', features };
     const geoLayer = L.geoJSON(geojson, {
       style: () => ({
         color: style.color, weight: style.type === 'line' ? 3 : 1,
