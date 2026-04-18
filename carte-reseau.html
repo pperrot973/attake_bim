@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Réseau électrique Guyane — Cartographie</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #1a1a2e; color: #fff; height: 100vh; display: flex; flex-direction: column; }
+
+  header {
+    background: linear-gradient(135deg, #16213e, #0f3460);
+    padding: 12px 20px; display: flex; align-items: center; gap: 12px;
+    border-bottom: 2px solid #e94560; flex-shrink: 0;
+  }
+  header h1 { font-size: 1.1rem; font-weight: 700; }
+  header p { font-size: 0.75rem; opacity: 0.7; }
+  .back-btn {
+    margin-left: auto; padding: 6px 14px; border-radius: 6px;
+    background: rgba(255,255,255,.1); color: white; text-decoration: none;
+    font-size: .8rem; border: 1px solid rgba(255,255,255,.2);
+  }
+  .back-btn:hover { background: rgba(255,255,255,.2); }
+
+  #map { flex: 1; }
+
+  /* PANNEAU COUCHES */
+  .layer-panel {
+    position: absolute; top: 80px; right: 12px; z-index: 1000;
+    background: rgba(22, 33, 62, 0.95); border-radius: 10px;
+    border: 1px solid rgba(255,255,255,.15); padding: 12px; min-width: 240px;
+    backdrop-filter: blur(8px);
+  }
+  .layer-panel h3 { font-size: .8rem; text-transform: uppercase; letter-spacing: .08em; opacity: .6; margin-bottom: 10px; }
+  .layer-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,.06); cursor: pointer;
+  }
+  .layer-item:last-child { border-bottom: none; }
+  .layer-item input[type=checkbox] { width: 15px; height: 15px; cursor: pointer; accent-color: #e94560; }
+  .layer-dot { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; }
+  .layer-line { width: 24px; height: 4px; border-radius: 2px; flex-shrink: 0; }
+  .layer-name { font-size: .82rem; flex: 1; }
+  .layer-count { font-size: .72rem; opacity: .5; }
+  .layer-loading { font-size: .7rem; opacity: .6; }
+
+  /* STATS */
+  .stats-bar {
+    position: absolute; bottom: 0; left: 0; right: 0; z-index: 1000;
+    background: rgba(22, 33, 62, 0.9); padding: 8px 16px;
+    display: flex; gap: 20px; align-items: center; flex-wrap: wrap;
+    border-top: 1px solid rgba(255,255,255,.1); backdrop-filter: blur(8px);
+  }
+  .stat { font-size: .78rem; opacity: .8; }
+  .stat strong { color: #e94560; }
+
+  /* POPUP */
+  .leaflet-popup-content-wrapper { background: #16213e; color: #fff; border: 1px solid rgba(255,255,255,.2); border-radius: 8px; }
+  .leaflet-popup-tip { background: #16213e; }
+  .popup-title { font-weight: 700; margin-bottom: 8px; font-size: .9rem; color: #e94560; }
+  .popup-row { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,.08); font-size: .8rem; }
+  .popup-row:last-child { border-bottom: none; }
+  .popup-key { opacity: .6; }
+
+  /* SPINNER */
+  .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid rgba(255,255,255,.2); border-top-color: #e94560; border-radius: 50%; animation: spin .7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<header>
+  <div style="font-size:1.8rem">⚡</div>
+  <div>
+    <h1>Réseau électrique Guyane</h1>
+    <p>Postes sources · Pylônes · Lignes HTB · Installations · Open Data EDF Guyane</p>
+  </div>
+  <a href="index.html" class="back-btn">← Fiche bâtiment</a>
+</header>
+
+<div id="map"></div>
+
+<div class="layer-panel" id="layer-panel">
+  <h3>Couches réseau</h3>
+  <div id="layers-list">
+    <div style="font-size:.8rem;opacity:.6"><span class="spinner"></span> Chargement du catalogue...</div>
+  </div>
+</div>
+
+<div class="stats-bar" id="stats-bar">
+  <div class="stat">⚡ Réseau EDF Guyane — Open Data</div>
+  <div class="stat" id="stat-total">Chargement...</div>
+</div>
+
+<script>
+const EDF_BASE = 'https://opendata-guyane.edf.fr/data-fair/api/v1';
+
+// Bounding box Guyane
+const GUYANE_BBOX = [-54.6, 2.1, -51.6, 5.8];
+const GUYANE_CENTER = [4.0, -53.0];
+
+// Config des couches avec styles
+const LAYER_STYLES = {
+  'poste':        { color: '#e94560', type: 'point', icon: '🔴', label: 'Postes sources' },
+  'pylone':       { color: '#f59e0b', type: 'point', icon: '🟡', label: 'Pylônes HTB' },
+  'pylône':       { color: '#f59e0b', type: 'point', icon: '🟡', label: 'Pylônes HTB' },
+  'aérien':       { color: '#f97316', type: 'line',  icon: '🟠', label: 'Lignes HTB aériennes' },
+  'souterrain':   { color: '#8b5cf6', type: 'line',  icon: '🟣', label: 'Lignes HTB souterraines' },
+  'production':   { color: '#10b981', type: 'point', icon: '🟢', label: 'Installations production' },
+  'registre':     { color: '#10b981', type: 'point', icon: '🟢', label: 'Installations production' },
+  'default':      { color: '#60a5fa', type: 'point', icon: '🔵', label: '' },
+};
+
+function getStyle(title) {
+  const t = title.toLowerCase();
+  for (const [key, style] of Object.entries(LAYER_STYLES)) {
+    if (t.includes(key)) return style;
+  }
+  return LAYER_STYLES.default;
+}
+
+// ── INIT MAP ──────────────────────────────────────────────────────────────────
+const map = L.map('map', { zoomControl: true }).setView(GUYANE_CENTER, 8);
+
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '© OpenStreetMap © CARTO', maxZoom: 20, subdomains: 'abcd'
+}).addTo(map);
+
+// Tuile satellite en option
+const satellite = L.tileLayer(
+  'https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&FORMAT=image/jpeg&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}',
+  { maxZoom: 20, attribution: '© IGN' }
+);
+
+L.control.layers(
+  { 'Sombre (CARTO)': map._layers[Object.keys(map._layers)[0]], 'Satellite (IGN)': satellite },
+  {}, { position: 'topleft' }
+).addTo(map);
+
+const layerGroups = {};
+let totalFeatures = 0;
+
+// ── CHARGEMENT CATALOGUE ──────────────────────────────────────────────────────
+async function loadCatalogue() {
+  try {
+    const r = await fetch(`${EDF_BASE}/datasets?visibility=public&size=100`);
+    const catalog = await r.json();
+    const datasets = catalog.results || catalog;
+
+    // Filtrer Guyane avec données géo
+    const guyane = datasets.filter(d => {
+      const t = (d.title + ' ' + (d.summary || '')).toLowerCase();
+      return t.includes('guyane') && d.bbox;
+    });
+
+    // Exclure les datasets non cartographiques
+    const exclude = ['production', 'consommation', 'tarif', 'qualite', 'temps réel'];
+    const geoDs = guyane.filter(d => !exclude.some(e => d.title.toLowerCase().includes(e)));
+
+    renderLayerPanel(geoDs);
+
+    // Charger toutes les couches automatiquement
+    for (const ds of geoDs) {
+      await loadLayer(ds);
+    }
+
+    document.getElementById('stat-total').innerHTML =
+      `<strong>${totalFeatures}</strong> éléments réseau chargés · <strong>${geoDs.length}</strong> couches`;
+
+  } catch(e) {
+    document.getElementById('layers-list').innerHTML =
+      `<div style="font-size:.8rem;color:#e94560">Erreur : ${e.message}</div>`;
+  }
+}
+
+// ── RENDU PANNEAU ─────────────────────────────────────────────────────────────
+function renderLayerPanel(datasets) {
+  const list = document.getElementById('layers-list');
+  list.innerHTML = datasets.map((ds, i) => {
+    const style = getStyle(ds.title);
+    const shape = style.type === 'line'
+      ? `<div class="layer-line" style="background:${style.color}"></div>`
+      : `<div class="layer-dot" style="background:${style.color}"></div>`;
+    return `
+      <div class="layer-item" onclick="toggleLayer('${ds.id}')">
+        <input type="checkbox" id="chk-${ds.id}" checked>
+        ${shape}
+        <span class="layer-name">${ds.title.replace(' - Guyane','').replace('Guyane -','')}</span>
+        <span class="layer-count" id="cnt-${ds.id}"><span class="spinner"></span></span>
+      </div>`;
+  }).join('');
+}
+
+// ── CHARGEMENT COUCHE ─────────────────────────────────────────────────────────
+async function loadLayer(ds) {
+  const style = getStyle(ds.title);
+  const group = L.layerGroup().addTo(map);
+  layerGroups[ds.id] = group;
+
+  try {
+    const bbox = `${GUYANE_BBOX[0]},${GUYANE_BBOX[1]},${GUYANE_BBOX[2]},${GUYANE_BBOX[3]}`;
+    const r = await fetch(
+      `${EDF_BASE}/datasets/${ds.id}/lines?format=geojson&bbox=${bbox}&size=5000`
+    );
+    const geojson = await r.json();
+    const features = geojson.features || [];
+
+    if (!features.length) {
+      document.getElementById(`cnt-${ds.id}`).textContent = '0';
+      return;
+    }
+
+    totalFeatures += features.length;
+    document.getElementById(`cnt-${ds.id}`).textContent = features.length;
+
+    L.geoJSON(geojson, {
+      style: () => ({
+        color: style.color, weight: style.type === 'line' ? 2.5 : 1,
+        opacity: 0.85, fillColor: style.color, fillOpacity: 0.7
+      }),
+      pointToLayer: (feature, latlng) => {
+        return L.circleMarker(latlng, {
+          radius: 6, fillColor: style.color, color: '#fff',
+          weight: 1.5, opacity: 1, fillOpacity: 0.9
+        });
+      },
+      onEachFeature: (feature, layer) => {
+        const props = feature.properties || {};
+        const fields = Object.entries(props).filter(([k,v]) => v != null && !k.startsWith('_'));
+        const popupHtml = `
+          <div class="popup-title">${style.icon} ${ds.title.replace(' - Guyane','')}</div>
+          ${fields.slice(0, 8).map(([k,v]) =>
+            `<div class="popup-row"><span class="popup-key">${k}</span><span>${v}</span></div>`
+          ).join('')}`;
+        layer.bindPopup(popupHtml, { maxWidth: 280 });
+      }
+    }).addTo(group);
+
+  } catch(e) {
+    document.getElementById(`cnt-${ds.id}`).textContent = '!';
+  }
+}
+
+// ── TOGGLE COUCHE ─────────────────────────────────────────────────────────────
+function toggleLayer(id) {
+  const chk = document.getElementById(`chk-${id}`);
+  chk.checked = !chk.checked;
+  if (chk.checked) {
+    map.addLayer(layerGroups[id]);
+  } else {
+    map.removeLayer(layerGroups[id]);
+  }
+}
+
+loadCatalogue();
+</script>
+</body>
+</html>
