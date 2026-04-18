@@ -141,6 +141,7 @@ L.control.layers(
 
 const layerGroups = {};
 let totalFeatures = 0;
+const allBounds = [];
 
 // ── CHARGEMENT CATALOGUE ──────────────────────────────────────────────────────
 async function loadCatalogue() {
@@ -149,14 +150,19 @@ async function loadCatalogue() {
     const catalog = await r.json();
     const datasets = catalog.results || catalog;
 
-    // Filtrer datasets Guyane (avec ou sans bbox)
+    // Garder uniquement les datasets géographiques (bbox indexée = données géo)
+    // + inclure les datasets réseau connus même sans bbox (postes, pylônes, lignes, installations)
+    const GEO_KEYWORDS = ['poste', 'pylône', 'pylone', 'ligne', 'installation', 'registre',
+                          'capacit', 'réseau électrique', 'raccordement', 'file d\'attente'];
     const guyane = datasets.filter(d => {
-      const t = (d.title + ' ' + (d.summary || '') + ' ' + (d.topics || []).join(' ')).toLowerCase();
-      return t.includes('guyane');
+      const t = (d.title + ' ' + (d.summary || '')).toLowerCase();
+      const isGuyane = t.includes('guyane') || (d.owner && JSON.stringify(d.owner).toLowerCase().includes('guyane'));
+      const isGeo = d.bbox || GEO_KEYWORDS.some(k => t.includes(k));
+      return isGuyane && isGeo;
     });
 
-    // Exclure uniquement les datasets sans géométrie ou purement statistiques
-    const exclude = ['consommation', 'tarif', 'qualité', 'qualite', 'bilan', 'rapport'];
+    // Exclure datasets purement statistiques/temporels sans géométrie ponctuelle
+    const exclude = ['temps réel', 'horaire', 'annuelle', 'émission', 'emission', 'limitation'];
     const geoDs = guyane.filter(d => !exclude.some(e => d.title.toLowerCase().includes(e)));
 
     renderLayerPanel(geoDs);
@@ -164,6 +170,12 @@ async function loadCatalogue() {
     // Charger toutes les couches automatiquement
     for (const ds of geoDs) {
       await loadLayer(ds);
+    }
+
+    // Auto-zoom sur les données chargées
+    if (allBounds.length) {
+      const bounds = L.latLngBounds(allBounds);
+      if (bounds.isValid()) map.fitBounds(bounds, { padding: [40, 40] });
     }
 
     document.getElementById('stat-total').innerHTML =
@@ -221,15 +233,16 @@ async function loadLayer(ds) {
     totalFeatures += features.length;
     document.getElementById(`cnt-${ds.id}`).textContent = features.length;
 
-    L.geoJSON(geojson, {
+    const geoLayer = L.geoJSON(geojson, {
       style: () => ({
-        color: style.color, weight: style.type === 'line' ? 2.5 : 1,
-        opacity: 0.85, fillColor: style.color, fillOpacity: 0.7
+        color: style.color, weight: style.type === 'line' ? 3 : 1,
+        opacity: 0.9, fillColor: style.color, fillOpacity: 0.75
       }),
       pointToLayer: (feature, latlng) => {
+        allBounds.push(latlng);
         return L.circleMarker(latlng, {
-          radius: 6, fillColor: style.color, color: '#fff',
-          weight: 1.5, opacity: 1, fillOpacity: 0.9
+          radius: 9, fillColor: style.color, color: '#fff',
+          weight: 2, opacity: 1, fillOpacity: 0.95
         });
       },
       onEachFeature: (feature, layer) => {
@@ -241,8 +254,12 @@ async function loadLayer(ds) {
             `<div class="popup-row"><span class="popup-key">${k}</span><span>${v}</span></div>`
           ).join('')}`;
         layer.bindPopup(popupHtml, { maxWidth: 280 });
+        if (layer.getBounds) {
+          try { const b = layer.getBounds(); if (b.isValid()) allBounds.push(b.getCenter()); } catch(e) {}
+        }
       }
-    }).addTo(group);
+    });
+    geoLayer.addTo(group);
 
   } catch(e) {
     document.getElementById(`cnt-${ds.id}`).textContent = '!';
