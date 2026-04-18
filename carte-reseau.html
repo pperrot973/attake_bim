@@ -149,14 +149,14 @@ async function loadCatalogue() {
     const catalog = await r.json();
     const datasets = catalog.results || catalog;
 
-    // Filtrer Guyane avec données géo
+    // Filtrer datasets Guyane (avec ou sans bbox)
     const guyane = datasets.filter(d => {
-      const t = (d.title + ' ' + (d.summary || '')).toLowerCase();
-      return t.includes('guyane') && d.bbox;
+      const t = (d.title + ' ' + (d.summary || '') + ' ' + (d.topics || []).join(' ')).toLowerCase();
+      return t.includes('guyane');
     });
 
-    // Exclure les datasets non cartographiques
-    const exclude = ['production', 'consommation', 'tarif', 'qualite', 'temps réel'];
+    // Exclure uniquement les datasets sans géométrie ou purement statistiques
+    const exclude = ['consommation', 'tarif', 'qualité', 'qualite', 'bilan', 'rapport'];
     const geoDs = guyane.filter(d => !exclude.some(e => d.title.toLowerCase().includes(e)));
 
     renderLayerPanel(geoDs);
@@ -201,11 +201,17 @@ async function loadLayer(ds) {
 
   try {
     const bbox = `${GUYANE_BBOX[0]},${GUYANE_BBOX[1]},${GUYANE_BBOX[2]},${GUYANE_BBOX[3]}`;
-    const r = await fetch(
-      `${EDF_BASE}/datasets/${ds.id}/lines?format=geojson&bbox=${bbox}&size=5000`
-    );
-    const geojson = await r.json();
-    const features = geojson.features || [];
+    // Essai 1 : avec filtre bbox (WGS84)
+    let r = await fetch(`${EDF_BASE}/datasets/${ds.id}/lines?format=geojson&bbox=${bbox}&size=5000`);
+    let geojson = await r.json();
+    let features = geojson.features || [];
+
+    // Essai 2 : sans bbox si résultat vide (données en CRS local ou bbox non indexée)
+    if (!features.length) {
+      r = await fetch(`${EDF_BASE}/datasets/${ds.id}/lines?format=geojson&size=5000`);
+      geojson = await r.json();
+      features = geojson.features || [];
+    }
 
     if (!features.length) {
       document.getElementById(`cnt-${ds.id}`).textContent = '0';
