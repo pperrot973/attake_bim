@@ -124,18 +124,21 @@ function getStyle(title) {
 // ── INIT MAP ──────────────────────────────────────────────────────────────────
 const map = L.map('map', { zoomControl: true }).setView(GUYANE_CENTER, 8);
 
-L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+const tileVoyager = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
   attribution: '© OpenStreetMap © CARTO', maxZoom: 20, subdomains: 'abcd'
 }).addTo(map);
 
-// Tuile satellite en option
+const tileDark = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '© OpenStreetMap © CARTO', maxZoom: 20, subdomains: 'abcd'
+});
+
 const satellite = L.tileLayer(
   'https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&FORMAT=image/jpeg&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}',
   { maxZoom: 20, attribution: '© IGN' }
 );
 
 L.control.layers(
-  { 'Sombre (CARTO)': map._layers[Object.keys(map._layers)[0]], 'Satellite (IGN)': satellite },
+  { 'Clair (CARTO)': tileVoyager, 'Sombre (CARTO)': tileDark, 'Satellite (IGN)': satellite },
   {}, { position: 'topleft' }
 ).addTo(map);
 
@@ -146,13 +149,17 @@ const allBounds = [];
 // ── CHARGEMENT CATALOGUE ──────────────────────────────────────────────────────
 async function loadCatalogue() {
   try {
-    // bbox=true → uniquement les datasets géo-indexés (avec bbox définie)
+    // bbox=true → uniquement les datasets géo-indexés
     const r = await fetch(`${EDF_BASE}/datasets?visibility=public&size=100&bbox=true&select=id,title,summary,bbox,schema,projection`);
     const catalog = await r.json();
     const datasets = catalog.results || catalog;
 
-    // Tous ces datasets sont géo, pas besoin de filtre géo supplémentaire
-    const geoDs = datasets;
+    // Filtrer les datasets dont la bbox chevauche la Guyane [W,S,E,N] = [-55,1,-50,7]
+    const geoDs = datasets.filter(d => {
+      if (!d.bbox || d.bbox.length < 4) return false;
+      const [w, s, e, n] = d.bbox;
+      return w < -50 && e > -55 && s < 7 && n > 1;
+    });
 
     renderLayerPanel(geoDs);
 
