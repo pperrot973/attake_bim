@@ -635,7 +635,7 @@ async function loadEdfGuyane(lat, lon) {
     // 1. Production temps réel Guyane
     const prodDs = guyane.find(d => d.title.toLowerCase().includes('production') && d.title.toLowerCase().includes('temps réel'));
     if (prodDs) {
-      const pr = await fetchWithTimeout(`${EDF_BASE}/datasets/${prodDs.id}/lines?size=1&sort=-_updatedAt`);
+      const pr = await fetchWithTimeout(`${EDF_BASE}/datasets/${prodDs.id}/lines?size=1`);
       const pd = await pr.json();
       const item = (pd.results || [])[0];
       if (item) {
