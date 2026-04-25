@@ -3,7 +3,6 @@ import asyncio
 from typing import Optional
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.responses import Response
-from fastapi.staticfiles import StaticFiles
 
 from src.schemas import BatimentResponse, Coordonnees
 from src.providers import ban, cadastre, orthophoto, altimetrie, bdnb, rnb
@@ -179,7 +178,3 @@ async def get_cadastre_svg(
 
 def _track(name: str, result, ok: list, err: list):
     (ok if result is not None else err).append(name)
-
-
-# Serve HTML files — must be last so API routes take priority
-app.mount("/", StaticFiles(directory=".", html=True), name="static")
